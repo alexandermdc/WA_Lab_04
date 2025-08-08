@@ -1,6 +1,6 @@
 name: GCP Deploy
 on:
-  push:
+  push
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -10,12 +10,12 @@ jobs:
       - name: Install dependencies
         run: npm install
       - name: Lint
-        id: lint-step
+        id : lint-step
+        #continue-on-error: true
         run: npm run lint
       - name: check-lint
         if: failure() && steps.lint-step.outcome == 'failure'
-        run: echo "Código precisa ser revisto!!"
-
+        run: echo "Codigo precisa ser revisto!!"
   build_docker:
     needs: lint
     runs-on: ubuntu-latest
@@ -29,51 +29,44 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push Docker image to DockerHub
+      - name: Build and push Docker image
         uses: docker/build-push-action@v2
         with:
           context: ./
           push: true
-          dockerfile: ./Dockerfile
+          dockerfile: ./Dockerfile   # Specify the path to your Dockerfile here
           tags: alexandermdc/wa_lab_04:latest
-
   deploy:
-    needs: build_docker
+    needs: lint
+    name: Setup Gcloud Account
     runs-on: ubuntu-latest
     environment: wagcp_deploy
     env:
       IMAGE_NAME: gcr.io/${{ secrets.GCP_PROJECT_ID }}/wa_lab_04:latest
     steps:
+      # Git checkout
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v1
+      # Login to GCP
+      - name: LoginCCP
+        uses: google-github-actions/setup-gcloud@v0
         with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
-
-      - name: Setup gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2
-        with:
+          service_account_key: ${{ secrets.GCP_CREDENTIALS }}
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
+      # gcloud configure docker
       - name: Configure Docker
         run: gcloud auth configure-docker --quiet
 
+      # build image
       - name: Build Docker image
         run: docker build -t $IMAGE_NAME .
 
+      # push image to registry
       - name: Push Docker image
         run: docker push $IMAGE_NAME
 
+      # deploy image
       - name: Deploy Docker image
-        run: |
-          gcloud run deploy wacicd \
-            --image $IMAGE_NAME \
-            --region us-west1 \
-            --memory 128Mi \
-            --min-instances 0 \
-            --max-instances 1 \
-            --platform managed \
-            --port 8080 \
-            --allow-unauthenticated
+        run: gcloud run deploy wacicd --image $IMAGE_NAME --region us-west1 --memory 128Mi --min-instances 0 --max-instances 1 --platform managed --port 8080 --allow-unauthenticated
